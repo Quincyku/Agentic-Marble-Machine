@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marble Tag Messages</title>
+<style>
+  :root {
+    --bg: #f5f4f0; --panel: #ffffff; --text: #1e1e1c; --muted: #6c6b66; --line: #dddbd3;
+    --yes: #1c7c4a; --yes-bg: #dff3e7; --other: #a15c00; --other-bg: #fbecd2;
+    --no: #6c6b66; --no-bg: #eceae4; --accent: #2456c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171716; --panel: #222220; --text: #ecebe6; --muted: #a3a29b; --line: #3a3936;
+      --yes: #5fd795; --yes-bg: #143524; --other: #f0b45c; --other-bg: #3b2a10;
+      --no: #a3a29b; --no-bg: #2a2a28; --accent: #86a8f5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input[type=number], input[type=text] { font: inherit; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; }
+  label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  label.check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 13px; }
+  #status { border-radius: 10px; padding: 22px 16px; text-align: center; background: var(--no-bg); color: var(--no); }
+  #status.yes { background: var(--yes-bg); color: var(--yes); }
+  #status.other { background: var(--other-bg); color: var(--other); }
+  #statusText { font-size: clamp(26px, 6.5vw, 46px); font-weight: 750; line-height: 1.15; overflow-wrap: anywhere; }
+  #statusText div + div { margin-top: 10px; }
+  .tagRow { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .tagRow .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+  .tagRow.inRange .dot { background: var(--yes); }
+  .tagEpc { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); overflow-wrap: anywhere; margin-top: 3px; }
+  #pending { margin-top: 12px; padding: 12px; border-radius: 8px; background: var(--other-bg); }
+  #pending .row { flex-wrap: nowrap; }
+  #newMessage { flex: 1; min-width: 0; }
+  #statusEpc { font: 13px ui-monospace, Menlo, monospace; margin-top: 6px; min-height: 18px; overflow-wrap: anywhere; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; text-align: center; }
+  .stats b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  canvas { display: block; width: 100%; height: 90px; margin-top: 12px; border-top: 1px solid var(--line); }
+  .controls { display: grid; grid-template-columns: 110px 90px 90px 1fr; gap: 10px; align-items: end; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  td.yes { color: var(--yes); font-weight: 650; }
+  td.no { color: var(--no); }
+  #summary { margin: 0 0 10px; padding: 0; list-style: none; }
+  @media (max-width: 560px) { .controls { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Marble Tag Messages</h1>
+    <div class="row" style="margin:0">
+      <span id="conn" class="muted">Not connected</span>
+      <button id="connect" class="primary">Connect reader</button>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div id="status">
+      <div id="statusText">NOT DETECTED</div>
+      <div id="statusEpc"></div>
+    </div>
+    <div class="stats">
+      <div><b id="sinceLast">–</b><span class="muted">since last read</span></div>
+      <div><b id="rate">0.0</b><span class="muted">reads/sec (last 5 s)</span></div>
+      <div><b id="rssi">–</b><span class="muted">last signal (dBm)</span></div>
+    </div>
+    <canvas id="strip" aria-label="Reads over the last 30 seconds"></canvas>
+    <div class="row">
+      <span class="muted">Each dot is one read over the last 30 s. Higher means stronger.</span>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="beep" checked> Beep on each read</label>
+      <label class="check">Show NOT DETECTED after
+        <input type="number" id="holdSeconds" value="3" min="0.5" max="10" step="0.5" style="width:70px"> s without a read</label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Tags and messages</h2>
+    <div id="tagList"></div>
+    <p id="noTags" class="muted" hidden>No tags registered yet.</p>
+    <form id="pending" hidden>
+      <div class="muted">New tag found. Give it a message to register it:</div>
+      <div id="pendingEpc" class="tagEpc"></div>
+      <div class="row">
+        <input type="text" id="newMessage" placeholder="e.g. A voicemail from Mom">
+        <button type="submit" class="primary">Register</button>
+      </div>
+    </form>
+    <p id="registerHint" class="muted" style="margin:12px 0 0">To add a tag, hold one new tag near the reader.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Record a distance</h2>
+    <div class="controls">
+      <label class="field">Distance (cm)<input type="number" id="distance" value="2" min="0" step="0.5"></label>
+      <label class="field">Then add (cm)<input type="number" id="step" value="2" step="0.5"></label>
+      <label class="field">Seconds<input type="number" id="duration" value="10" min="2" max="60"></label>
+      <label class="field">Setup note (marble, orientation)<input type="text" id="note" placeholder="e.g. glass marble, tag facing reader"></label>
+    </div>
+    <div class="row">
+      <button id="measure" class="primary" disabled>Measure</button>
+      <span id="measureState" class="muted">Hold the tag still at that distance, then press Measure.</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="margin:0 0 10px; justify-content:space-between">
+      <h2 style="margin:0">Results</h2>
+      <div class="row" style="margin:0">
+        <button id="download">Download CSV</button>
+        <button id="undo">Remove last</button>
+        <button id="clear">Clear all</button>
+      </div>
+    </div>
+    <ul id="summary" class="muted"></ul>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Distance</th><th>Registered?</th><th>Reads</th><th>Reads/sec</th><th>Avg dBm</th><th>Best dBm</th><th>Other tags</th><th>Note</th>
+        </tr></thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const READ_LINE = /^READ,([0-9A-Fa-f]+),(-?\d+),([01])\s*$/;
+const STRIP_SECONDS = 30;
+const KEEP_MS = 120000;
+const STORAGE_KEY = 'marble-range-results';
+const TAGS_KEY = 'marble-tags';
+const DEFAULT_TAGS = [{ epc: 'E2000020090C005615701854', message: 'An email from Hiroshi' }];
+
+let reads = [];        // { t, epc, rssi, registered }, oldest first
+let results = loadResults();
+let tags = loadTags(); // { epc, message }
+let pendingEpc = null; // unregistered tag waiting for a message
+let shownStatus = null;
+let port = null;
+let keepReading = false;
+let audio = null;
+let measuring = null;  // { start, durationMs, distance, note }
+
+function handleLine(line) {
+  const match = READ_LINE.exec(line);
+  if (!match) return;
+  // The tag list on this page decides what is registered, not the board.
+  const epc = match[1].toUpperCase();
+  const read = { t: performance.now(), epc, rssi: Number(match[2]), registered: Boolean(findTag(epc)) };
+  reads.push(read);
+  while (reads.length && read.t - reads[0].t > KEEP_MS) reads.shift();
+  if (!read.registered) notePendingTag(epc);
+  beep(read.registered);
+}
+
+// ---- Tags and messages ----
+
+function findTag(epc) { return tags.find(tag => tag.epc === epc); }
+
+function loadTags() {
+  try {
+    const saved = localStorage.getItem(TAGS_KEY);
+    return saved === null ? [...DEFAULT_TAGS] : JSON.parse(saved);
+  } catch (err) {
+    return [...DEFAULT_TAGS];
+  }
+}
+
+function saveTags() {
+  try { localStorage.setItem(TAGS_KEY, JSON.stringify(tags)); } catch (err) {}
+}
+
+function setReadsRegistered(epc, registered) {
+  reads.forEach(read => { if (read.epc === epc) read.registered = registered; });
+}
+
+// Keeps the current tag while a message is being typed for it.
+function notePendingTag(epc) {
+  if (pendingEpc === epc) return;
+  if (pendingEpc && $('newMessage').value.trim()) return;
+  pendingEpc = epc;
+  renderPending();
+  if (document.activeElement === document.body) $('newMessage').focus();
+}
+
+function renderPending() {
+  $('pending').hidden = !pendingEpc;
+  $('registerHint').hidden = Boolean(pendingEpc);
+  $('pendingEpc').textContent = pendingEpc || '';
+}
+
+function registerPendingTag(event) {
+  event.preventDefault();
+  const message = $('newMessage').value.trim();
+  if (!pendingEpc || !message) { $('newMessage').focus(); return; }
+  tags.push({ epc: pendingEpc, message });
+  setReadsRegistered(pendingEpc, true);
+  pendingEpc = null;
+  $('newMessage').value = '';
+  saveTags();
+  renderTags();
+  renderPending();
+}
+
+function removeTag(tag) {
+  if (!confirm(`Remove the tag with the message "${tag.message}"?`)) return;
+  tags = tags.filter(other => other !== tag);
+  setReadsRegistered(tag.epc, false);
+  saveTags();
+  renderTags();
+}
+
+function renderTags() {
+  const list = $('tagList');
+  list.textContent = '';
+  $('noTags').hidden = tags.length > 0;
+  for (const tag of tags) {
+    const row = document.createElement('div');
+    row.className = 'tagRow';
+    row.dataset.epc = tag.epc;
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+
+    const details = document.createElement('div');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = tag.message;
+    input.setAttribute('aria-label', 'Message for this tag');
+    input.addEventListener('change', () => {
+      const message = input.value.trim();
+      if (message) { tag.message = message; saveTags(); } else { input.value = tag.message; }
+    });
+    const epc = document.createElement('div');
+    epc.className = 'tagEpc';
+    epc.textContent = tag.epc;
+    details.append(input, epc);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => removeTag(tag));
+
+    row.append(dot, details, remove);
+    list.appendChild(row);
+  }
+}
+
+function showStatus(className, lines, detail) {
+  const key = JSON.stringify([className, lines, detail]);
+  if (key === shownStatus) return;
+  shownStatus = key;
+  $('status').className = className;
+  const text = $('statusText');
+  text.textContent = '';
+  for (const line of lines) {
+    const div = document.createElement('div');
+    div.textContent = line;
+    text.appendChild(div);
+  }
+  $('statusEpc').textContent = detail;
+}
+
+function beep(registered) {
+  if (!$('beep').checked || !audio) return;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.frequency.value = registered ? 1100 : 500;
+  gain.gain.value = 0.08;
+  osc.connect(gain).connect(audio.destination);
+  osc.start();
+  osc.stop(audio.currentTime + 0.05);
+}
+
+// ---- Serial connection ----
+
+async function connect() {
+  if (port) { await disconnect(); return; }
+  if (!('serial' in navigator)) {
+    setConnection('This browser has no Web Serial. Open this page in Chrome or Edge.');
+    return;
+  }
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    audio.resume();
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (err) {
+    port = null;
+    setConnection(err.name === 'NotFoundError' ? 'No port selected' :
+      'Could not open the port. Close the Arduino Serial Monitor and try again.');
+    return;
+  }
+  setConnection('Connected');
+  $('connect').textContent = 'Disconnect';
+  $('connect').classList.remove('primary');
+  $('measure').disabled = false;
+  readLoop();
+}
+
+async function readLoop() {
+  keepReading = true;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (port && port.readable && keepReading) {
+      const reader = port.readable.getReader();
+      port.activeReader = reader;
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          lines.forEach(handleLine);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+  } catch (err) {
+    // Reached when the board resets or the cable is pulled.
+  }
+  if (keepReading) await disconnect('Connection lost. Press Connect reader.');
+}
+
+async function disconnect(message) {
+  keepReading = false;
+  const closing = port;
+  port = null;
+  if (closing) {
+    try { if (closing.activeReader) await closing.activeReader.cancel(); } catch (err) {}
+    try { await closing.close(); } catch (err) {}
+  }
+  setConnection(message || 'Not connected');
+  $('connect').textContent = 'Connect reader';
+  $('connect').classList.add('primary');
+  $('measure').disabled = true;
+}
+
+function setConnection(text) { $('conn').textContent = text; }
+
+// ---- Live status ----
+
+function updateLive() {
+  const now = performance.now();
+  const last = reads[reads.length - 1];
+  const holdMs = (Number($('holdSeconds').value) || 2) * 1000;
+  const present = reads.filter(r => now - r.t < holdMs);
+
+  // Each tag in range once, most recently read first.
+  const inRange = [...new Set(present.map(r => r.epc).reverse())];
+  const known = inRange.map(findTag).filter(Boolean);
+
+  if (known.length) {
+    showStatus('yes', known.map(tag => tag.message), known.length === 1 ? known[0].epc : '');
+  } else if (inRange.length) {
+    showStatus('other', ['NEW TAG'], inRange[0]);
+  } else {
+    showStatus('', ['NOT DETECTED'], '');
+  }
+
+  document.querySelectorAll('.tagRow').forEach(row => {
+    row.classList.toggle('inRange', inRange.includes(row.dataset.epc));
+  });
+
+  $('sinceLast').textContent = last ? ((now - last.t) / 1000).toFixed(1) + ' s' : '–';
+  $('rate').textContent = (reads.filter(r => now - r.t < 5000).length / 5).toFixed(1);
+  $('rssi').textContent = last ? last.rssi : '–';
+
+  updateMeasurement(now);
+  drawStrip(now);
+}
+
+function drawStrip(now) {
+  const canvas = $('strip');
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const style = getComputedStyle(document.documentElement);
+  const yesColor = style.getPropertyValue('--yes');
+  const otherColor = style.getPropertyValue('--other');
+  const TOP_DBM = -20, BOTTOM_DBM = -80;
+
+  for (const read of reads) {
+    const age = (now - read.t) / 1000;
+    if (age > STRIP_SECONDS) continue;
+    const x = width - (age / STRIP_SECONDS) * width;
+    const level = Math.min(1, Math.max(0, (read.rssi - BOTTOM_DBM) / (TOP_DBM - BOTTOM_DBM)));
+    const y = 6 + (1 - level) * (height - 12);
+    ctx.fillStyle = read.registered ? yesColor : otherColor;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---- Measurements ----
+
+function startMeasure() {
+  if (measuring) return;
+  const seconds = Math.max(2, Number($('duration').value) || 10);
+  measuring = {
+    start: performance.now(),
+    durationMs: seconds * 1000,
+    distance: Number($('distance').value) || 0,
+    note: $('note').value.trim(),
+  };
+  $('measure').disabled = true;
+}
+
+function updateMeasurement(now) {
+  if (!measuring) return;
+  const elapsed = now - measuring.start;
+  const during = reads.filter(r => r.t >= measuring.start);
+  if (elapsed < measuring.durationMs) {
+    const left = Math.ceil((measuring.durationMs - elapsed) / 1000);
+    $('measureState').textContent = `Measuring ${measuring.distance} cm: ${left} s left, ${during.length} reads so far. Keep it still.`;
+    return;
+  }
+  finishMeasure(during);
+}
+
+function finishMeasure(during) {
+  const registered = during.filter(r => r.registered);
+  const seconds = measuring.durationMs / 1000;
+  const levels = registered.map(r => r.rssi);
+  results.push({
+    distance: measuring.distance,
+    note: measuring.note,
+    seconds,
+    reads: registered.length,
+    otherReads: during.length - registered.length,
+    average: levels.length ? levels.reduce((a, b) => a + b, 0) / levels.length : null,
+    best: levels.length ? Math.max(...levels) : null,
+  });
+  saveResults();
+  renderResults();
+  $('measureState').textContent = `Saved ${measuring.distance} cm: ${registered.length} registered reads in ${seconds} s.`;
+  $('distance').value = measuring.distance + (Number($('step').value) || 0);
+  measuring = null;
+  $('measure').disabled = !port;
+}
+
+function renderResults() {
+  const body = $('results');
+  body.textContent = '';
+  const sorted = [...results].sort((a, b) => a.note.localeCompare(b.note) || a.distance - b.distance);
+  for (const r of sorted) {
+    const row = body.insertRow();
+    const seen = r.reads > 0;
+    const cells = [
+      r.distance + ' cm',
+      seen ? 'YES' : 'NO',
+      r.reads,
+      (r.reads / r.seconds).toFixed(1),
+      r.average === null ? '–' : r.average.toFixed(1),
+      r.best === null ? '–' : r.best,
+      r.otherReads,
+      r.note,
+    ];
+    cells.forEach((value, i) => {
+      const cell = row.insertCell();
+      cell.textContent = value;
+      if (i === 1) cell.className = seen ? 'yes' : 'no';
+    });
+  }
+
+  const summary = $('summary');
+  summary.textContent = '';
+  const notes = [...new Set(results.map(r => r.note))];
+  for (const note of notes) {
+    const hits = results.filter(r => r.note === note && r.reads > 0).map(r => r.distance);
+    const misses = results.filter(r => r.note === note && r.reads === 0).map(r => r.distance);
+    const furthest = hits.length ? Math.max(...hits) + ' cm' : 'none';
+    const nearestMiss = misses.length ? Math.min(...misses) + ' cm' : 'none yet';
+    const item = document.createElement('li');
+    item.textContent = `${note || 'No note'}: furthest registered ${furthest}, closest not registered ${nearestMiss}`;
+    summary.appendChild(item);
+  }
+}
+
+function downloadCsv() {
+  const quote = v => `"${String(v === null ? '' : v).replace(/"/g, '""')}"`;
+  const header = ['distance_cm', 'registered', 'seconds', 'reads', 'reads_per_sec', 'avg_dbm', 'best_dbm', 'other_tag_reads', 'note'];
+  const rows = results.map(r => [
+    r.distance, r.reads > 0 ? 'yes' : 'no', r.seconds, r.reads, (r.reads / r.seconds).toFixed(2),
+    r.average === null ? null : r.average.toFixed(1), r.best, r.otherReads, r.note,
+  ].map(quote).join(','));
+  const url = URL.createObjectURL(new Blob([[header.join(','), ...rows].join('\n')], { type: 'text/csv' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'marble_range_test.csv';
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function loadResults() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch (err) { return []; }
+}
+function saveResults() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(results)); } catch (err) {}
+}
+
+$('pending').addEventListener('submit', registerPendingTag);
+$('connect').addEventListener('click', connect);
+$('measure').addEventListener('click', startMeasure);
+$('download').addEventListener('click', downloadCsv);
+$('undo').addEventListener('click', () => { results.pop(); saveResults(); renderResults(); });
+$('clear').addEventListener('click', () => {
+  if (results.length && confirm('Clear all results?')) { results = []; saveResults(); renderResults(); }
+});
+
+renderTags();
+renderPending();
+renderResults();
+setInterval(updateLive, 100);
+</script>
+</body>
+</html>
